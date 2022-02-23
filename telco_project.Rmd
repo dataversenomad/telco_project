@@ -1,0 +1,655 @@
+---
+title: "**Telco Assessment**"
+author: "Jaime Paz"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::downcute:
+    self_contained: true
+    default_style: "light"
+    downcute_theme: "default"
+
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
+---
+
+<center><img
+src="https://www.portafolio.co/files/article_main/uploads/2019/09/24/5d8acad774b37.jpeg"
+width="1000" 
+height="200">
+</center>
+
+## Problem Assessment
+    
+Our assessment consists of on a geolocation information of a set of 1,752 wireless subscribers for a phone company in various cells across **Nova Scotia**. The historical data was provided as of September 1st, 2020. We have also been provided a dataset containing information for the Poseidon CTC Mall and its geofence cell list. 
+
+By using the data science toolbox, we need to understand how much average time the subscribers are spending at the Poseidon CTC Mall. The goal of the project is to create an executive summary and create business insights that will help the marketing team to achieve this objective.
+
+## Business Problem 
+
+Recently, there has been several discussions within our marketing team to develop a strategy to approaching our clients more efficiently, accordingly to the time that they spend in the current Poseidon CTC Mall. As a team, we need to understand what should be the better time frame in which we can target those clients by using the average dwell time, which is a metric to show the “amount of time” a device uses a particular channel.
+
+Our current point of interest (POI) to develop this strategy, corresponds to the Poseidon CTC Mall.
+
+## Business Value
+
+By developing a strategy to target our clients efficiently, we are creating organic growth to the business which is achieved by enhancing our sales revenue. By putting in production our final data product, we will be able to get to know our clients better and improve our Voice of Customer.
+
+## Tools used
+
+The tools used for this project are:
+
+**Python Programming:** Python provides a vast set of utilities do develop data science and machine learning through the most prominent packages: Pandas, Scikit-Learn, Numpy and others.
+
+**R - Reticulate:** Reticulate is a tool to run both Python and R on the same environment
+
+**R Markdown:** R Programming (through RStudio) provides a set of tools to publish our work using documents and HTML sources, to provide better presentations to our executives or audience.
+
+## ASSESSMENT PART 1
+
+
+## 1. Loading packages
+
+First we load reticulate package to write Python / R code in our Markdown enviroment:
+
+```{r packages_r}
+
+# Use only once:
+
+#Sys.setenv(RETICULATE_PYTHON = "/usr/local/bin/python3.7")
+#library(reticulate)
+#use_python('/usr/bin/python3', require = T)
+```
+
+
+
+Second, we import Python packages
+
+```{python packages_py}
+import pandas as pd              # package for data wrangling and transformation
+import numpy as np               # package for linear algebra
+import seaborn as sns            # advanced graphical interface package 
+import matplotlib.pyplot as plt  # basic graphical interface package
+import copy
+import warnings
+warnings.filterwarnings('ignore')
+from sklearn.cluster import KMeans
+```
+
+
+## 2. Collecting & Preparing Data
+
+The fist step is to get the data which has been stored in a csv format. In addition to the files already provided, I was able to find supporting information that would help our analysis at *https://mcc-mnc-list.com/list*.
+
+With the *cgi* dataset I was able to get information about:
+
+*MCC*: Mobile Country Code
+*MNC*: Mobile Network Code
+*LAC*: Location Area Code
+*CI*: Cell Identity
+
+
+```{python}
+# geo location data 
+geo = pd.read_csv('/home/analytics/R/Projects/Python/datasets/telco/geolocation_data.csv')
+
+# Poseidon CTC Mall Geofence data
+poseidon = pd.read_csv('/home/analytics/R/Projects/Python/datasets/telco/Poseidon CTC Mall Geofence Cell List.csv')
+
+# cgi data
+cgi = pd.read_csv('/home/analytics/R/Projects/Python/datasets/telco/cgi.csv')
+
+```
+
+### Checking shape and data structure
+
+#### geolocation data
+
+```{python}
+print(geo.shape)
+```
+
+```{python}
+geo.head()
+```
+
+#### poseidon data
+
+```{python}
+print(poseidon.shape)
+```
+
+```{python}
+poseidon.head()
+```
+
+```{python}
+poseidon['Poseidon CTC Mall Geofence Cell List'].nunique()
+```
+
+We have 75 unique cells (that fences the **POI of "Poseidon CTC Mall"**) to which we are interested in. So we drop the duplicate values and have it ready to be merged:
+
+```{python}
+poseidon.drop_duplicates(subset=['Poseidon CTC Mall Geofence Cell List'], inplace = True)
+```
+
+```{python}
+poseidon.shape # indeed we have 75 cells
+```
+
+```{python}
+poseidon.head() 
+```
+
+#### CGI(Cell Global Identity)
+
+```{python}
+cgi.shape
+```
+
+```{python}
+cgi.head()
+```
+
+Converting data types:
+
+```{python}
+cgi.MCC = cgi.MCC.astype('object')
+cgi.MNC = cgi.MNC.astype('object')
+
+```
+
+
+## 3. Merging the data
+
+
+```{python}
+
+df = pd.merge(poseidon, geo, left_on = 'Poseidon CTC Mall Geofence Cell List', right_on = 'cgi_id')
+
+```
+
+```{python}
+df.head()
+```
+
+```{python}
+df.shape
+```
+
+No of unique clients to be analized: 33
+
+
+```{python}
+df.imsi_id.nunique()
+```
+
+
+## 4. Data verification / cleaning
+
+```{python}
+
+telco_nulls = df.isna().sum()[df.isna().sum()!= 0].reset_index().rename(columns=
+                                                                        {'index': 'col_name', 0: '#'})
+telco_nulls['%'] = telco_nulls['#'] / df.shape[0]
+telco_nulls
+```
+
+No NULL values were found on the data.
+
+
+## 5. Data Transformation & Feature Engineering
+
+#### Extract Information from CGI: MCC - MNC - LAC - CI
+
+```{python}
+new = df["cgi_id"].str.split("-", n = 4, expand = True)
+broad_MCC = pd.DataFrame(new[0])
+# If broadband does not contain 4G then place "other"
+broad_MCC[1] = broad_MCC[0].map(lambda x: "4G" if "4G" in x else 'Other')
+```
+
+#### Beacuse MCC is always a 3 digit character, then we extract the last 3 characters:
+
+
+```{python}
+broad_MCC[2] = broad_MCC[0].str[-3:]
+broad_MCC[2].nunique() #indeed we have only 1 value.
+broad_MCC.head()
+```
+
+
+```{python}
+df['broadband'] = broad_MCC[1]
+df['MCC'] = broad_MCC[2]
+df['MNC'] =  new[1]
+df['LAC'] =  new[2]
+df['CI'] =  new[3]
+df.head()
+```
+
+#### Dropping unnessary columns
+
+
+```{python}
+df.drop(columns=['Poseidon CTC Mall Geofence Cell List', 'cgi_id'], inplace = True)
+df.head()
+```
+
+#### converting data types to able to merge data
+
+```{python}
+df.MCC = df.MCC.astype('str')
+df.MNC = df.MNC.astype('str')
+cgi.MCC = cgi.MCC.astype('str')
+cgi.MNC = cgi.MNC.astype('str')
+telco = pd.merge(df, cgi, how = 'left', left_on = ['MCC', 'MNC'], right_on = ['MCC', 'MNC' ])
+telco.head()
+```
+
+```{python}
+telco.shape
+```
+
+As we can see, we have merged the data correctly. Some columns showed previously, was to show the type of information that we have in our hands. For instance, Country and Brand: They show the country that we are analyzing, and brand has similarity with the operator. ISO also contains "CA".
+
+From this point on, we are going to these 2 columns:
+
+```{python}
+telco.drop(columns=['ISO', 'Country', 'Brand'], inplace = True)
+```
+
+```{python}
+telco.head()
+```
+
+
+## 6. Exploratory Data Analysis
+
+Our data exploration consists in analyzing our categorical & numerical variables. Next, we will be focusing on the time-based analysis.
+
+
+### 6.1. Client Analysis
+
+
+```{python}
+
+telco.imsi_id.nunique()
+```
+
+```{python}
+telco.shape[0]
+```
+
+### **Insight 1:** On September 1st 2020, we had a total of 432 visits covered by our current POI (located at Poseidon CTC Mall, Canada). In total, the POI served 33 unique clients. 
+
+### 6.2. Broadband Analysis
+
+```{python}
+sns.countplot(telco.broadband)
+```
+
+```{python}
+round(100 * telco.groupby(['broadband']).size() / telco.shape[0])
+```
+
+### **Insight 2:** Our POI demanded 34% of 4G broadband and 66% of the rest. This 66% was catalogued as “other” since there was no specification on the dataset about the broadband covered on this particular points.
+
+
+### 6.3. MCC / MNC / LAC / CI Analysis
+
+```{python}
+telco.groupby(['MCC']).size()
+```
+
+```{python}
+telco.groupby(['MNC']).size()
+```
+
+```{python}
+sns.countplot(telco.LAC)
+plt.show()
+```
+
+```{python}
+LAC = pd.DataFrame()
+LAC['n'] = telco.groupby(['LAC']).size()
+LAC['%'] = round(100 * (LAC['n'] / telco.shape[0]))
+LAC
+```
+
+```{python}
+CI = pd.DataFrame()
+CI['n'] = telco.groupby(['CI']).size().sort_values(ascending = False)
+CI['%'] = round(100 * (CI['n'] / telco.shape[0]))
+CI
+```
+
+### **Insight 3:** On September 1st 2020, our POI registered two types of MNC (Mobile Network Code): 220 (441 times) and 880 (1 time). We were able to find the information regarding this codes, and extract the operator names **source: https://mcc-mnc-list.com/list**: "Telus Mobility" (220) and "Shared Telus, Bell, and SaskTel (880)"
+
+
+### **Insight 4:** In addition to the previous insight, our group of cell towers is divided in 3 categories: 11204, 113122 and 123353. There was a high demand on the LAC 11204 (285 times) of about 66%; this is the most critical group so far. Our POI registered a total of 16 cells serving our Poseidon CTC Mall and most demanded CIs (Cells Ids) were: 24122 (26%), 24353 (18%) and 21122 (12%). The rest is serving around 44% of the time.
+
+
+### 6.4 Time-Based Data (event_ts) 
+
+#### Formatting time-based data (convert date time to minutes)
+
+```{python}
+telco.event_ts = df.event_ts.astype('datetime64[ns]')
+telco = telco.sort_values(by = ['event_ts'], ascending = True)
+time = pd.DatetimeIndex(telco.event_ts)  # converts to datetime object index
+telco['hours'] = (time.hour  + time.minute / 60 + time.second / 3600 )
+telcov2 = copy.deepcopy(telco)
+telco.head(10)
+```
+
+```{python}
+output = telco.groupby('imsi_id').agg(
+    dwell_time = ('hours', 'mean' ),
+    r_visits = ('hours', 'count')
+     ).sort_values(by = ['dwell_time'], ascending = True).reset_index()
+```
+
+Next, we present the list of our 33 clients according to their dwell_time and the number of recurrent visits by each one of them:
+
+```{python}
+pd.set_option('display.max_rows', 50)
+output
+```
+
+### **Insight 5:** Our greatest potential client registered on September 1st, 2020 was:
+
+```{python}
+output[output.r_visits == output.r_visits.max()]
+```
+#### In addition, we can target this client in business hours from 1 PM - 2 PM.
+
+
+#### Insight 6: Our most concurrent currents registered in our Poseidon CTC Mall POI were:
+
+```{python}
+output.nlargest(3, 'r_visits')
+```
+
+
+
+## 7. DWELL TIME AVERAGE ANALYSYS 
+
+### Displaying the distribution of dwell time by the number of recurrent visits:
+
+
+```{python}
+output_bin = copy.deepcopy(output)
+
+output_bin['points_bin'] = pd.qcut(output_bin['dwell_time'], q=8)
+
+#bining the data
+output_bin = output_bin.groupby('points_bin').agg(
+    r_visits = ('r_visits', 'sum')
+     ).reset_index()
+
+#plotting the data:     
+plt.figure(figsize = (15, 5))
+sns.barplot(x = output_bin.points_bin, y = output_bin.r_visits, color = 'blue')
+# Labeling of the plot
+plt.xlabel('dwell time (hrs)') 
+plt.ylabel('Recurrent visits')
+plt.title('Distribution of dwell time (Poseidon CTC Mall)')
+plt.show()
+```
+
+
+### **Insight 6 (a):** Busiest hours at Poseidon CTC Mall on Sept 1st 2020 occurred between 10 hrs and 13 hrs, with a number of recurrent > 160. Particularly, this is the segment that our marketing work force should focus on.  
+
+### Displaying the relationship between dwell time and the number of recurrent visits:
+
+```{python}
+plt.figure(figsize = (15, 5))
+sns.scatterplot(x = output.dwell_time, y = output.r_visits)
+# Labeling of the plot
+plt.xlabel('dwell time (hrs)') 
+plt.ylabel('Recurrent visits')
+plt.title('Dwell_time vs Recurrent visits (Poseidon CTC Mall)')
+plt.show()
+```
+
+
+```{python}
+output[output.r_visits == output.r_visits.max()]
+
+```
+
+
+### **Insight 6 (b):** We can see a potential outlier which corresponds to the previous client stated before. Apart from that, the number of recurrent visits seems to stay below 40. There are interesting points during the very early mornings. Probably these are people attenting on security? Probably there is pretty nightlife in the place?  Considering if there are any cinema theater located at the mall, most probably these are late schedules due to movie premieres.
+
+
+```{python}
+ts = copy.deepcopy(telcov2)
+ts['cnt'] = 1
+#ts = ts.groupby('event_ts').agg({"cnt": "sum"}).reset_index()
+ts.event_ts = ts.event_ts.astype(str)
+```
+
+
+## 8. Client Trend Analysis
+
+### Loading R Packages
+
+```{r}
+library(reticulate)
+ts_data <- py$ts
+```
+
+```{r echo=T, results='hide', warning=FALSE, message=FALSE}
+# Forecasting Libraries ----
+library(forecast)    
+library(tidymodels)   
+library(modeltime)    
+library(tidyverse)    
+library(lubridate)    
+library(timetk)       
+library(plotly)
+```
+
+```{r}
+#renaming colums
+
+ts_data$Date <- ts_data$event_ts 
+
+#converting to datetime
+ts_data$Date <- as.POSIXct(as.character(ts_data$Date), format = "%Y-%d-%m %H:%M:%S")
+ts_data <- as_tibble(ts_data)
+```
+
+
+### Plotting the data
+
+```{r echo=T, warning=FALSE, message=FALSE}
+
+#summarize by hour
+
+p1 <- ts_data %>%  group_by(Date) %>%
+  summarize_by_time(.date_var=Date, .by = 'hour', no_visits = sum(cnt) ) %>%
+  plot_time_series(Date, no_visits,  .smooth = FALSE,
+                   .title = "Poseidon CTC Malls Visits Trend - Sep 1st 2020", .y_lab =  "count of client visits" ) 
+p1
+```
+
+
+### **Insight 8:** Clearly, we can spot an increasing trend regarding the number of visits by our in our Poseidon CTC Mall. By the end of the day, we have registered 54 unique clients. 
+
+
+#### Lets understand the patterns of our both broadband technologies:
+
+```{r echo=T, warning=FALSE, message=FALSE}
+
+#summarize by hour
+
+p2 <- ts_data %>%  group_by(broadband) %>%
+  summarize_by_time(.date_var=Date, .by = 'hour', no_visits = sum(cnt) ) %>%
+  plot_time_series(Date, no_visits,  .smooth = TRUE,
+                   .color_var = broadband ,
+                   .title = "Poseidon CTC Broadband types - Sep 1st 2020", 
+                   .y_lab =  "count of client visits", .facet_ncol = 2,
+                   .facet_scales = "free" )  
+p2
+```
+
+### **Insight 9:** 4G broadband technology is not equaly consumed in our POI. It will be interesting to know which are these 'other' broadband technologies.
+
+#### Lets understand the patterns in each CELL that is consumed by our LAC Code:
+
+```{r echo=T, warning=FALSE, message=FALSE}
+
+#summarize by hour
+
+p3 <- ts_data %>%  group_by(LAC) %>%
+  summarize_by_time(.date_var=Date, .by = 'hour', no_visits = sum(cnt) ) %>%
+  plot_time_series(Date, no_visits,  
+                   .title = "Poseidon CTC Mall by LAC - Sep 1st 2020", 
+                   .y_lab =  "count of client visits", .facet_ncol = 2,
+                   .facet_scales = "free" ) 
+p3
+```
+
+
+### **Insight 10:** Local Are Code 11204 is highly demanded in several houurs of the day. LAC 123353 doesn't seem to show any particular movement except for the end of the day, specially at 7:00 PM.
+
+
+
+#### Let's see our top (most consumed) CIs:
+
+```{r echo=T, warning=FALSE, message=FALSE}
+
+#summarize by hour
+
+p4 <- ts_data %>%  group_by(CI) %>%
+  summarize_by_time(.date_var=Date, .by = 'hour', no_visits = sum(cnt) ) %>% arrange(desc(no_visits)) %>% 
+  filter(CI %in% c('111', '24122', '131', '24122', '41')) %>%
+  plot_time_series(Date, no_visits,  .smooth = FALSE,
+                   .title = "Poseidon CTC Mall by CI - Sep 1st 2020", 
+                   .y_lab =  "count of client visits", .facet_ncol = 1,
+                   .facet_scales = "free" ) 
+p4
+```
+
+### **Insight 11:** Apparently, not al CIs are highly during the day. For instance CI 111 only shows movement during the last hours of the nigh, and CI 31 shows fluctuations betwee 12::00 hrs till the end of the day.
+
+
+
+## ASSESSMENT PART 2
+
+
+Once the average dwell times analysis is complete, cluster the subscribers seen inside Poseidon CTC Mall into various segments, and explain the various segments. We would also like to know how did you select the #segments (or K value), if at all.
+
+## 1. Selecting the data
+
+
+Storing the data for the columns: dwell_time and r_visits (by each distinct client):
+
+```{python}
+output_2 = output
+X = output_2.iloc[:, [1,2]].values  
+
+```
+
+## 2. Model Building
+
+```{python}
+# By applying K-Means algorithm, we are going to find the best cluster number 
+# The idea, is to reduce WCSS (Within - Cluster - Sum of Squares)
+from sklearn.cluster import KMeans
+wcss = []
+
+# Getting the maximun numbers of clusters (to begin with, we set 10 by default)
+
+# According to the official documentation of scikit learn, we use:
+
+#‘k-means++’ : selects initial cluster centers for k-mean clustering in a smart way to speed up 
+#convergence.
+
+# random_state = 123, just be sure a fixed randomness
+
+# Inertia tell us calculates the sum of distances of all the points within a cluster from the centroid of that
+# cluster
+
+# by default, we chose to select an 'auto' algorithm for converging. Euclidean distance is used in this case,
+# but it might change according to our performance.
+
+for i in range(1,11):
+    kmeans = KMeans(n_clusters= i, max_iter = 300, 
+                    init='k-means++', random_state=123, 
+                    algorithm='auto')
+    kmeans.fit(X)
+    wcss.append(kmeans.inertia_)
+
+
+```
+
+
+## 3. Visualizing results
+
+
+```{python}
+
+# Viewing ELBOW method to get the optimal value of K
+
+plt.plot(range(1,11), wcss)
+plt.title('Elbow Method')
+plt.xlabel('No. of clusters')
+plt.ylabel('wcss')
+plt.show() 
+
+```
+
+From the graph above, we can see that according to the "Elbow validation approach", if we choose 6 clusters, then we will achieving a minium error of wcss
+
+```{python}
+
+#Model Build
+kmeans_model = KMeans(n_clusters= 6, max_iter = 300, 
+                    init='k-means++', random_state=123, 
+                    verbose = 1, algorithm='auto')
+output_2 ['y_pred'] = kmeans_model.fit_predict(X)
+
+```
+
+
+```{python}
+
+# plot results
+plt.figure(figsize=(10,6))
+
+plot_clusters = sns.scatterplot(x='dwell_time', y='r_visits', hue='y_pred',palette='Set1', s=100, alpha=0.2,  
+                data=output_2).set_title('KMeans Clusters (6)', fontsize=15)
+
+
+plt.show()
+
+```
+
+By looking at the previous graph we are able to segment our customers using 4 clusters. It’s important to remark the most of our clients stay below 40 visits a day. There is one particular cluster (1) that was highly skewed greater than 120. This shows that from now on, any other potential client which behaves similarly will belong to this particular cluster.
+
+
+## FINAL WORDS AND RECOMMENDATIONS
+
+
+**(1)** By analyzing the performance of our Poseidon CTC PO **dwell time**, we were able to understand the patterns and relationships on our data that will help the marketing department to know and approach better to our clients. We were capable to segment the most prominent clients in our current portfolio. This will also allow the sales leaders to focus specifically on segments in which they can target new customers or making offerings to the current ones.
+
+**(2)** By understanding our broadband / MNC / LAC, we were able to find the frequency and cyclical patterns in our client behavior. That would help the marketing leaders to focus specifically in particular times in the current day.
+
+**(3)** We used machine learning  to find a solution in clustering our current clients according to their dwell time and count of visits. If there are any new clients, our algorithm will be capable to assign a cluster to a particular client. **It’s highly recommended** that we keep up updating our models periodically, since the structure, behavior of the clients and systematic events could affect the performance of those models.
+
+**(4)** Next steps are to publish put our machine learning in production or embed the results into a dashboard. As per the time series analysis, is also recommended to build a forecasting model capable to predict the number of clients demanded in our current Poseidon CTC PO.
+
+
+
+
+
+
+
+
+

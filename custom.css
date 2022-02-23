@@ -1,0 +1,24 @@
+
+#content h2 {
+    background-color: #FCFCFC;
+}
+
+#content legend {
+    background-color: #0000B1;
+    color: #0000B1;
+}
+
+h1, h2, h3, h4, h5, h6, legend {
+    color: #0000B1;
+    
+}
+
+
+#sidebar {
+  background-color: #000000;
+}
+
+
+#sidebar h2 {
+  background-color: #5D9162;
+}
